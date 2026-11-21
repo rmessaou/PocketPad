@@ -36,18 +36,21 @@ class GamepadState {
         lt = other.lt; rt = other.rt
     }
 
-    /** Serialize to the 9-byte HID input report payload. */
-    fun toReport(): ByteArray = byteArrayOf(
-        (buttons and 0xFF).toByte(),
-        ((buttons shr 8) and 0xFF).toByte(),
-        (hat and 0x0F).toByte(),
-        (lx and 0xFF).toByte(),
-        (ly and 0xFF).toByte(),
-        (rx and 0xFF).toByte(),
-        (ry and 0xFF).toByte(),
-        (lt and 0xFF).toByte(),
-        (rt and 0xFF).toByte()
-    )
+    /** Serialize to the 9-byte HID input report payload, with the selected host's button order. */
+    fun toReport(androidButtonLayout: Boolean = false): ByteArray {
+        val wireButtons = if (androidButtonLayout) HidConstants.androidButtonField(buttons) else buttons
+        return byteArrayOf(
+            (wireButtons and 0xFF).toByte(),
+            ((wireButtons shr 8) and 0xFF).toByte(),
+            (hat and 0x0F).toByte(),
+            (lx and 0xFF).toByte(),
+            (ly and 0xFF).toByte(),
+            (rx and 0xFF).toByte(),
+            (ry and 0xFF).toByte(),
+            (lt and 0xFF).toByte(),
+            (rt and 0xFF).toByte()
+        )
+    }
 
     companion object {
         /**

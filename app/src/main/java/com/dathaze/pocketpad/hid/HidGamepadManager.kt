@@ -22,13 +22,14 @@ import java.util.concurrent.Executors
  *  1. [start] — obtains the HID_DEVICE profile proxy.
  *  2. registerApp — announces the phone as a gamepad via SDP.
  *  3. The TV pairs/connects (or we call [connectTo] for an already-paired TV).
- *  4. [send] — 7-byte input reports on every state change.
+ *  4. [send] — 9-byte gamepad input reports on state changes.
  *
  * All permission-guarded calls are wrapped: on Android 12+ the caller must
  * hold BLUETOOTH_CONNECT before calling [start].
  */
 @SuppressLint("MissingPermission")
 class HidGamepadManager(private val context: Context, private val listener: Listener) {
+    private val trace = ControllerTrace(context)
 
     /** Typed connection lifecycle events; the UI maps these to localized text. */
     enum class HidStatus {
@@ -198,7 +199,9 @@ class HidGamepadManager(private val context: Context, private val listener: List
         }
         post { listener.onHidStatus(HidStatus.CONNECTING, safeName(device)) }
         try {
-            if (!proxy.connect(device)) {
+            val accepted = proxy.connect(device)
+            trace.log { "connect requested: accepted=$accepted" }
+            if (!accepted) {
                 post { listener.onHidStatus(HidStatus.CONNECT_REFUSED, safeName(device)) }
             }
         } catch (_: SecurityException) {
@@ -224,9 +227,9 @@ class HidGamepadManager(private val context: Context, private val listener: List
      * It no longer compares against the last *accepted* report, which is what used to let a
      * refused press swallow its own release.
      */
-    fun send(state: GamepadState) {
+    fun send(state: GamepadState, androidButtonLayout: Boolean) {
         if (connectedDevice == null) return
-        queue.offer(state.toReport())
+        queue.offer(state.toReport(androidButtonLayout))
         // Always queued; only drained when no retry is outstanding. Draining here during a
         // backoff is what used to spend the queue's retry budget at touch-sample rate.
         if (drainPolicy.mayDrainNow()) drain()
@@ -266,7 +269,7 @@ class HidGamepadManager(private val context: Context, private val listener: List
         while (true) {
             val frame = queue.peek() ?: break
             val accepted = try {
-                proxy.sendReport(device, HidConstants.REPORT_ID, frame)
+                sendReport(proxy, device, HidConstants.REPORT_ID, frame)
             } catch (_: SecurityException) {
                 post { listener.onHidStatus(HidStatus.PERMISSION_MISSING, null) }
                 queue.reset()
@@ -286,7 +289,8 @@ class HidGamepadManager(private val context: Context, private val listener: List
         while (true) {
             val key = keyQueue.peek() ?: break
             val accepted = try {
-                proxy.sendReport(
+                sendReport(
+                    proxy,
                     device, HidConstants.REPORT_ID_KEYBOARD, HidConstants.keyboardReport(key)
                 )
             } catch (_: SecurityException) {
@@ -303,6 +307,23 @@ class HidGamepadManager(private val context: Context, private val listener: List
                 scheduleDrain()
                 return
             }
+        }
+    }
+
+    private fun sendReport(
+        proxy: BluetoothHidDevice,
+        device: BluetoothDevice,
+        id: Int,
+        payload: ByteArray,
+    ): Boolean {
+        trace.log { "sendReport id=$id payload=${ControllerTrace.hex(payload)}" }
+        return try {
+            proxy.sendReport(device, id, payload).also { accepted ->
+                trace.log { "sendReport id=$id accepted=$accepted" }
+            }
+        } catch (e: SecurityException) {
+            trace.log { "sendReport id=$id permission denied" }
+            throw e
         }
     }
 
@@ -330,6 +351,7 @@ class HidGamepadManager(private val context: Context, private val listener: List
 
         override fun onServiceDisconnected(profile: Int) {
             if (profile != BluetoothProfile.HID_DEVICE) return
+            trace.log { "HID_DEVICE profile disconnected" }
             hidDevice = null
             registered = false
             connectedDevice = null
@@ -355,7 +377,9 @@ class HidGamepadManager(private val context: Context, private val listener: List
             // often because something else already holds the exclusive HID Device role. The
             // callback then never fires, so without checking this the app sat on "registering"
             // for good and the user had no way to tell that from a pairing problem.
-            if (!proxy.registerApp(sdp, null, outgoingQos(), liveExecutor(), hidCallback)) {
+            val accepted = proxy.registerApp(sdp, null, outgoingQos(), liveExecutor(), hidCallback)
+            trace.log { "registerApp accepted=$accepted descriptorBytes=${HidConstants.REPORT_DESCRIPTOR.size}" }
+            if (!accepted) {
                 post { listener.onHidStatus(HidStatus.REGISTRATION_FAILED, null) }
             }
         } catch (_: SecurityException) {
@@ -399,6 +423,7 @@ class HidGamepadManager(private val context: Context, private val listener: List
 
     private val hidCallback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, isRegistered: Boolean) {
+            trace.log { "onAppStatusChanged registered=$isRegistered" }
             registered = isRegistered
             if (isRegistered) {
                 reRegisterAttempts = 0
@@ -417,6 +442,7 @@ class HidGamepadManager(private val context: Context, private val listener: List
         }
 
         override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) {
+            trace.log { "onConnectionStateChanged state=$state (0=disconnected, 1=connecting, 2=connected)" }
             when (state) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     connectedDevice = device
@@ -447,8 +473,14 @@ class HidGamepadManager(private val context: Context, private val listener: List
                     type, id, bufferSize, BluetoothHidDevice.REPORT_TYPE_INPUT
                 )
                 when (outcome) {
-                    is HidRequestOutcome.Reply ->
-                        proxy.replyReport(device, type, id, outcome.payload)
+                    is HidRequestOutcome.Reply -> {
+                        trace.log {
+                            "replyReport type=$type id=$id bufferSize=$bufferSize " +
+                                "payload=${ControllerTrace.hex(outcome.payload)}"
+                        }
+                        val accepted = proxy.replyReport(device, type, id, outcome.payload)
+                        trace.log { "replyReport id=$id accepted=$accepted" }
+                    }
                     HidRequestOutcome.UnsupportedType ->
                         proxy.reportError(device, BluetoothHidDevice.ERROR_RSP_UNSUPPORTED_REQ)
                     HidRequestOutcome.UnknownReportId ->

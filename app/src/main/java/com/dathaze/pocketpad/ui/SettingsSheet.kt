@@ -45,6 +45,7 @@ class SettingsSheet(private val activity: Activity) {
         fun controllerStyleLabel(): String
         fun vibrationLabel(): String
         fun tvMenuKeysOn(): Boolean
+        fun androidButtonLayoutOn(): Boolean
 
         /** Version string of a waiting update, or null when there is nothing to offer. */
         fun pendingUpdateLabel(): String?
@@ -56,6 +57,7 @@ class SettingsSheet(private val activity: Activity) {
         fun onMoveButtons()
         fun onChooseVibration()
         fun onToggleTvMenuKeys()
+        fun onToggleAndroidButtonLayout()
         fun onBackgroundPicture()
         fun onCheckForUpdates()
         fun onBluetoothSettings()
@@ -167,6 +169,10 @@ class SettingsSheet(private val activity: Activity) {
             subtitle = R.string.sheet_sub_tv_menu_keys,
             switchOn = host.tvMenuKeysOn(),
             chevron = false) { host.onToggleTvMenuKeys() }
+        row(rows, "↔", Tint.CONTROLLER, R.string.sheet_android_button_layout,
+            subtitle = R.string.sheet_sub_android_button_layout,
+            switchOn = host.androidButtonLayoutOn(),
+            chevron = false) { host.onToggleAndroidButtonLayout() }
 
         group(rows, R.string.sheet_group_appearance)
         row(rows, "▦", Tint.APPEARANCE, R.string.action_background) { host.onBackgroundPicture() }

@@ -93,6 +93,26 @@ class HidReportTest {
         assertEquals(declared, HidConstants.keyboardReport(HidConstants.KEY_NONE).size)
     }
 
+    @Test
+    fun idleHatUsesTheDeclaredNullStateRatherThanDown() {
+        val items = parseDescriptor()
+        val hatUsage = items.indexOf(Item(0x08, 0x39))
+        assertTrue("descriptor has a hat usage", hatUsage >= 0)
+        val field = items.drop(hatUsage + 1).takeWhile { it.tag != 0x80 }
+        val min = field.single { it.tag == 0x14 }.data
+        val max = field.single { it.tag == 0x24 }.data
+        assertEquals(4, field.single { it.tag == 0x74 }.data)
+        assertTrue("hat allows a null state", items[hatUsage + field.size + 1].data and 0x40 != 0)
+        fun linuxDirection(payload: ByteArray): Int {
+            val rawHat = payload[2].toInt() and 0x0f
+            // Linux hid-input maps directions to 1..8 and out-of-range values to 0.
+            val direction = (rawHat - min) * 8 / (max - min + 1) + 1
+            return if (direction in 1..8) direction else 0
+        }
+        assertEquals(0, linuxDirection(GamepadState().toReport()))
+        assertEquals(5, linuxDirection(GamepadState().apply { hat = 4 }.toReport()))
+    }
+
     // ------------------------------------------------------ button numbering
 
     private val allButtons = mapOf(

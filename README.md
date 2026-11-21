@@ -183,6 +183,8 @@ A dedicated USB-host driver handles the DualShock 3 (`0x054C` / `0x0268`) direct
 
 Controllers that Android exposes as native gamepads are forwarded through `KeyEvent` and `MotionEvent`: face buttons, bumpers, triggers, stick clicks, Select/Start/Mode, both sticks, and the hat axes. Analog trigger values are read from the platform's trigger/brake/gas axes and forwarded as analog values rather than being flattened to on/off.
 
+When the **receiving device** is an Android phone or tablet, enable **Settings → Controller → Android host button layout**. This uses Android's generic HID button numbering without changing the report descriptor. Leave it off for an existing TV mapping. Keep **TV menu keys** off when testing a gamepad to avoid duplicate keyboard input. See [Android controller testing](docs/ANDROID_CONTROLLER_TESTING.md) for pairing and diagnostics.
+
 ---
 
 ## How it works
@@ -198,7 +200,7 @@ The phone takes the **HID Device (peripheral)** role through `BluetoothHidDevice
 | **ID 1 — Gamepad** | 16 buttons; 8-way hat switch with null state; four 8-bit axes (X, Y, Z, Rz); two 8-bit analog triggers declared as **Brake** and **Accelerator** on the Simulation Controls page | 9 bytes |
 | **ID 2 — Keyboard** | Standard boot-style keyboard: modifier byte, reserved byte, six key slots | 8 bytes |
 
-Thirteen buttons are mapped in the standard gamepad order — A/B/X/Y, bumpers, triggers, View, Menu, both stick clicks, then Guide. Analog triggers exist because a digital button is not enough for anything that reads a throttle.
+The original PocketPad layout sends A/B/X/Y, bumpers, triggers, View, Menu, both stick clicks, then Guide in slots 1–13. The optional Android host layout uses the slots expected by Android's generic key layout, leaving the C and Z slots unused. Analog triggers exist because a digital button is not enough for anything that reads a throttle.
 
 The keyboard collection serves two purposes: it lets the pad drive a host's menus as arrow keys when the user opts in, and it gives hosts that ignore a bare gamepad a familiar profile to enumerate.
 

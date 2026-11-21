@@ -31,6 +31,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.dathaze.pocketpad.hid.ControllerAxes
+import com.dathaze.pocketpad.hid.ControllerTrace
 import com.dathaze.pocketpad.hid.ExternalInputTracker
 import com.dathaze.pocketpad.hid.BluetoothReadiness
 import com.dathaze.pocketpad.hid.GamepadState
@@ -44,7 +46,6 @@ import com.dathaze.pocketpad.update.AppUpdater
 import com.dathaze.pocketpad.update.UpdateFlow
 import com.dathaze.pocketpad.update.UpdateNoticeController
 import com.dathaze.pocketpad.usb.Ds3UsbDriver
-import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity(),
     ControllerView.Listener,
@@ -79,6 +80,8 @@ class MainActivity : AppCompatActivity(),
      * and Escape in particular is read as "quit" by cloud gaming clients.
      */
     private var tvNavigation = false
+    private var androidButtonLayout = false
+    private val inputTrace by lazy { ControllerTrace(this) }
 
     /**
      * Physical controller input, kept per device so one disconnecting drops
@@ -201,7 +204,12 @@ class MainActivity : AppCompatActivity(),
             // so stop ignoring input from it.
             externalInputs.markAttached(deviceId)
         }
-        override fun onInputDeviceChanged(deviceId: Int) = Unit
+        override fun onInputDeviceChanged(deviceId: Int) {
+            // A layout or source change may not send releases in the old layout.
+            val hadInput = externalInputs.remove(deviceId)
+            externalInputs.markAttached(deviceId)
+            if (hadInput) refreshExternalState()
+        }
         override fun onInputDeviceRemoved(deviceId: Int) {
             if (externalInputs.remove(deviceId)) refreshExternalState()
         }
@@ -220,7 +228,12 @@ class MainActivity : AppCompatActivity(),
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) enterImmersiveMode()
+        if (hasFocus) {
+            enterImmersiveMode()
+        } else if (externalInputs.clearAndroidSources()) {
+            inputTrace.log { "window lost focus: cleared Android controller state" }
+            refreshExternalState()
+        }
     }
 
     override fun onDestroy() {
@@ -339,6 +352,7 @@ class MainActivity : AppCompatActivity(),
             else -> Haptics.Level.STRONG
         }
         tvNavigation = prefs.getBoolean(PREF_TV_NAV, false)
+        androidButtonLayout = prefs.getBoolean(PREF_ANDROID_BUTTON_LAYOUT, false)
     }
 
     /**
@@ -391,6 +405,7 @@ class MainActivity : AppCompatActivity(),
         )
 
         override fun tvMenuKeysOn(): Boolean = tvNavigation
+        override fun androidButtonLayoutOn(): Boolean = androidButtonLayout
 
         override fun pendingUpdateLabel(): String? = updateNotice.pendingUpdateLabel()
 
@@ -401,6 +416,12 @@ class MainActivity : AppCompatActivity(),
         override fun onMoveButtons() = startLayoutEdit()
         override fun onChooseVibration() = showHapticsPicker()
         override fun onToggleTvMenuKeys() = toggleTvNavigation()
+        override fun onToggleAndroidButtonLayout() {
+            androidButtonLayout = !androidButtonLayout
+            getPreferences(MODE_PRIVATE).edit()
+                .putBoolean(PREF_ANDROID_BUTTON_LAYOUT, androidButtonLayout).apply()
+            sendMerged()
+        }
         override fun onBackgroundPicture() = showBackgroundMenu()
         override fun onCheckForUpdates() = checkForUpdates()
         override fun onBluetoothSettings() {
@@ -759,7 +780,7 @@ class MainActivity : AppCompatActivity(),
         // The view can emit state before onCreate finishes wiring things up.
         if (!::hidManager.isInitialized) return
         GamepadState.merge(controllerView.touchState, externalState, mergedState)
-        hidManager.send(mergedState)
+        hidManager.send(mergedState, androidButtonLayout)
         if (tvNavigation) hidManager.sendKey(navKeyFor(mergedState))
     }
 
@@ -784,21 +805,42 @@ class MainActivity : AppCompatActivity(),
         val source = event.source
         return source and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
             source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK ||
-            KeyEvent.isGamepadButton(event.keyCode)
+            KeyEvent.isGamepadButton(event.keyCode) ||
+            // Built-in pads can tag directional keys as DPAD or KEYBOARD rather
+            // than GAMEPAD. Only accept those keys from an actual controller.
+            (isDpadKey(event.keyCode) && event.device?.let {
+                it.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
+                    it.supportsSource(InputDevice.SOURCE_JOYSTICK)
+            } == true)
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (isGamepadEvent(event) &&
-            handleGamepadKey(event.deviceId, keyCode, pressed = true)
-        ) return true
-        return super.onKeyDown(keyCode, event)
+    private fun isDpadKey(keyCode: Int): Boolean = when (keyCode) {
+        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> true
+        else -> false
     }
 
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (isGamepadEvent(event) &&
-            handleGamepadKey(event.deviceId, keyCode, pressed = false)
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Handle controller input before a focused view can consume one half of a press.
+        val gamepad = isGamepadEvent(event)
+        if (gamepad || isDpadKey(event.keyCode)) {
+            inputTrace.log {
+                val action = when (event.action) {
+                    KeyEvent.ACTION_DOWN -> "ACTION_DOWN"
+                    KeyEvent.ACTION_UP -> "ACTION_UP"
+                    else -> event.action.toString()
+                }
+                "key ${ControllerTrace.device(event.deviceId, event.source, event.device)} " +
+                    "$action code=${event.keyCode} " +
+                    "${KeyEvent.keyCodeToString(event.keyCode)} scan=${event.scanCode} " +
+                    "repeat=${event.repeatCount} canceled=${event.isCanceled} gamepad=$gamepad"
+            }
+        }
+        if (gamepad && (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) &&
+            handleGamepadKey(event.deviceId, event.keyCode,
+                pressed = event.action == KeyEvent.ACTION_DOWN && !event.isCanceled)
         ) return true
-        return super.onKeyUp(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
     private fun handleGamepadKey(deviceId: Int, keyCode: Int, pressed: Boolean): Boolean {
@@ -821,23 +863,17 @@ class MainActivity : AppCompatActivity(),
         if (buttonIndex >= 0) {
             // A disconnected controller's late events must not revive it.
             val source = externalInputs.sourceIfAttached(deviceId) ?: return false
-            source.state.setButton(buttonIndex, pressed)
-            // Controllers that report triggers as plain keys still need the
-            // axis moved, or throttle input never reaches the host.
             when (buttonIndex) {
-                HidConstants.BTN_L2 -> source.state.lt = if (pressed) 255 else 0
-                HidConstants.BTN_R2 -> source.state.rt = if (pressed) 255 else 0
+                HidConstants.BTN_L2 -> source.setTriggerKey(left = true, pressed = pressed)
+                HidConstants.BTN_R2 -> source.setTriggerKey(left = false, pressed = pressed)
+                else -> source.state.setButton(buttonIndex, pressed)
             }
             refreshExternalState()
             return true
         }
-        val isDpad = keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-            keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
-            keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
         // Check before touching the tracker, so an unrelated key cannot create
         // an empty source that then looks like an attached controller.
-        if (!isDpad) return false
+        if (!isDpadKey(keyCode)) return false
         val source = externalInputs.sourceIfAttached(deviceId) ?: return false
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_UP -> source.keyUp = pressed
@@ -850,61 +886,75 @@ class MainActivity : AppCompatActivity(),
         return true
     }
 
-    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         val isJoystick =
             event.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
         if (isJoystick && event.action == MotionEvent.ACTION_MOVE) {
             val source = externalInputs.sourceIfAttached(event.deviceId)
-                ?: return super.onGenericMotionEvent(event)
-            source.state.lx = axisToByte(event.getAxisValue(MotionEvent.AXIS_X))
-            source.state.ly = axisToByte(event.getAxisValue(MotionEvent.AXIS_Y))
-            source.state.rx = axisToByte(event.getAxisValue(MotionEvent.AXIS_Z))
-            source.state.ry = axisToByte(event.getAxisValue(MotionEvent.AXIS_RZ))
+                ?: return super.dispatchGenericMotionEvent(event)
+            val device = event.device
+            inputTrace.log {
+                val axes = device?.motionRanges.orEmpty().filter { it.source == event.source }
+                    .joinToString { range ->
+                        "${MotionEvent.axisToString(range.axis)}=${event.getAxisValue(range.axis)}" +
+                            "[${range.min}..${range.max},flat=${range.flat}]"
+                    }
+                "motion ${ControllerTrace.device(event.deviceId, event.source, device)} $axes"
+            }
+            fun range(axis: Int) = device?.getMotionRange(axis, event.source)
+            fun centered(axis: Int): Float {
+                val r = range(axis) ?: return 0f
+                return ControllerAxes.centered(event.getAxisValue(axis), r.min, r.max, r.flat)
+            }
+            fun trigger(axis: Int): Float {
+                val r = range(axis) ?: return 0f
+                return ControllerAxes.trigger(event.getAxisValue(axis), r.min, r.max, r.flat)
+            }
+            source.state.lx = ControllerAxes.stickByte(centered(MotionEvent.AXIS_X))
+            source.state.ly = ControllerAxes.stickByte(centered(MotionEvent.AXIS_Y))
+            // Prefer the conventional Android Z/RZ pair. RX/RY is a fallback
+            // when Z/RZ is not centered (e.g. used for triggers) or incomplete.
+            val z = range(MotionEvent.AXIS_Z)
+            val rz = range(MotionEvent.AXIS_RZ)
+            val useRxRy = (z == null || rz == null || z.min >= 0f || rz.min >= 0f) &&
+                range(MotionEvent.AXIS_RX) != null && range(MotionEvent.AXIS_RY) != null
+            val rightX = if (useRxRy) MotionEvent.AXIS_RX else MotionEvent.AXIS_Z
+            val rightY = if (useRxRy) MotionEvent.AXIS_RY else MotionEvent.AXIS_RZ
+            source.state.rx = ControllerAxes.stickByte(centered(rightX))
+            source.state.ry = ControllerAxes.stickByte(centered(rightY))
 
             // Recomputed every event, including when the hat returns to centre
             // — otherwise the last direction stays latched. Key-reported
             // directions are tracked separately and are not disturbed.
-            val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
-            val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
-            source.axisLeft = hatX < -0.5f
-            source.axisRight = hatX > 0.5f
-            source.axisUp = hatY < -0.5f
-            source.axisDown = hatY > 0.5f
-            source.applyDpad()
+            source.setHatAxes(centered(MotionEvent.AXIS_HAT_X), centered(MotionEvent.AXIS_HAT_Y))
 
             val lt = maxOf(
-                event.getAxisValue(MotionEvent.AXIS_LTRIGGER),
-                event.getAxisValue(MotionEvent.AXIS_BRAKE)
+                trigger(MotionEvent.AXIS_LTRIGGER),
+                trigger(MotionEvent.AXIS_BRAKE)
             )
             val rt = maxOf(
-                event.getAxisValue(MotionEvent.AXIS_RTRIGGER),
-                event.getAxisValue(MotionEvent.AXIS_GAS)
+                trigger(MotionEvent.AXIS_RTRIGGER),
+                trigger(MotionEvent.AXIS_GAS)
             )
-            // Forward the real analog value, not just a pressed/not-pressed
-            // bit — a throttle read as on/off is unusable in driving games.
-            source.state.lt = triggerToByte(lt)
-            source.state.rt = triggerToByte(rt)
-            source.state.setButton(HidConstants.BTN_L2, lt > 0.12f)
-            source.state.setButton(HidConstants.BTN_R2, rt > 0.12f)
+            source.setTriggerAxes(lt, rt)
 
             refreshExternalState()
             return true
         }
-        return super.onGenericMotionEvent(event)
+        return super.dispatchGenericMotionEvent(event)
     }
 
     /** Refold every attached controller and transmit the result. */
     private fun refreshExternalState() {
         externalInputs.combineInto(externalState)
+        inputTrace.log {
+            with(externalState) {
+                "physical state buttons=0x${buttons.toString(16)} hat=$hat " +
+                    "left=$lx,$ly right=$rx,$ry triggers=$lt,$rt"
+            }
+        }
         sendMerged()
     }
-
-    private fun axisToByte(value: Float): Int =
-        ((value.coerceIn(-1f, 1f) + 1f) / 2f * 255f).roundToInt().coerceIn(0, 255)
-
-    /** Triggers report 0..1, unlike sticks which are -1..1. */
-    private fun triggerToByte(value: Float): Int =
-        (value.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
 
     // ------------------------------------------------------------- USB (DS3)
 
@@ -971,6 +1021,7 @@ class MainActivity : AppCompatActivity(),
         statusView.text = getString(R.string.status_connected, name)
         statusView.setTextColor(STATUS_CONNECTED)
         controllerView.linkState = ControllerView.LinkState.CONNECTED
+        sendMerged()
         if (!tvNavigation) hidManager.sendKey(HidConstants.KEY_NONE)
         device?.let {
             getPreferences(MODE_PRIVATE).edit()
@@ -988,6 +1039,7 @@ class MainActivity : AppCompatActivity(),
     private companion object {
         const val REQUEST_BLUETOOTH = 101
         const val PREF_TV_NAV = "tv_navigation"
+        const val PREF_ANDROID_BUTTON_LAYOUT = "android_button_layout"
         const val PREF_BG_X = "background_pan_x"
         const val PREF_BG_Y = "background_pan_y"
         const val PREF_LAST_DEVICE = "last_device_address"

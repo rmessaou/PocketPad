@@ -114,4 +114,6 @@
     <string name="banner_update_now">Update Now</string>
     <string name="banner_dismiss_glyph" translatable="false">\u2715</string>
     <string name="banner_dismiss_description">Dismiss for today</string>
+    <string name="sheet_android_button_layout">Android host button layout</string>
+    <string name="sheet_sub_android_button_layout">Use when the receiving device runs Android. Leave off for existing TV mappings.</string>
 </resources>
