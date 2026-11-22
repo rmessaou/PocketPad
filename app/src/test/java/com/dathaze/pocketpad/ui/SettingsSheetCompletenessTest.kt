@@ -74,6 +74,13 @@ class SettingsSheetCompletenessTest {
     }
 
     @Test
+    fun blackScreenIsASettingsAction() {
+        assertTrue(sheet.contains("R.string.sheet_black_screen"))
+        assertTrue(sheet.contains("{ host.onEnterBlackScreen() }"))
+        assertTrue(activity.contains("override fun onEnterBlackScreen() = enterBlackScreen()"))
+    }
+
+    @Test
     fun allFourGroupsArePresent() {
         listOf("connection", "controller", "appearance", "system").forEach {
             assertTrue("group $it missing", sheet.contains("R.string.sheet_group_$it"))

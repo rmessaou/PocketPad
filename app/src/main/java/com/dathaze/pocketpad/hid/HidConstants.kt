@@ -26,10 +26,8 @@ object HidConstants {
     const val KEY_DOWN: Byte = 0x51
     const val KEY_UP: Byte = 0x52
 
-    // Bit indices into the 16-bit button field. The order is the standard
-    // gamepad numbering every host expects — A/B/X/Y, bumpers, triggers,
-    // View, Menu, stick clicks, then Guide. Getting this order wrong makes a
-    // host read the wrong control entirely.
+    // Logical button indices, also the original PocketPad wire order. Android's
+    // generic HID key layout uses a different order; see GamepadState.toReport.
     const val BTN_CROSS = 0      // button 1  — A / Cross
     const val BTN_CIRCLE = 1     // button 2  — B / Circle
     const val BTN_SQUARE = 2     // button 3  — X / Square
@@ -43,6 +41,19 @@ object HidConstants {
     const val BTN_L3 = 10        // button 11 — left stick click
     const val BTN_R3 = 11        // button 12 — right stick click
     const val BTN_PS = 12        // button 13 — Guide / PS / Xbox
+
+    // Linux hid-input maps HID Game Pad button usage N to evdev key 303 + N.
+    // Android Generic.kl maps codes 304..318 to A/B/C/X/Y/Z, L1/R1,
+    // L2/R2, Select/Start/Mode and the stick clicks (C and Z are unused here).
+    private val androidButtonBits = intArrayOf(0, 1, 3, 4, 6, 7, 8, 9, 10, 11, 13, 14, 12)
+
+    internal fun androidButtonField(buttons: Int): Int {
+        var mapped = 0
+        for (index in androidButtonBits.indices) {
+            if (buttons and (1 shl index) != 0) mapped = mapped or (1 shl androidButtonBits[index])
+        }
+        return mapped
+    }
 
     // Hat switch values (0 = up, clockwise), 8 = released/neutral.
     const val HAT_NEUTRAL = 8

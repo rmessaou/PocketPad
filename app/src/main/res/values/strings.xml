@@ -114,4 +114,9 @@
     <string name="banner_update_now">Update Now</string>
     <string name="banner_dismiss_glyph" translatable="false">\u2715</string>
     <string name="banner_dismiss_description">Dismiss for today</string>
+    <string name="sheet_android_button_layout">Android host button layout</string>
+    <string name="sheet_sub_android_button_layout">Use when the receiving device runs Android. Leave off for existing TV mappings.</string>
+    <string name="sheet_black_screen">Black screen mode</string>
+    <string name="sheet_sub_black_screen">Dim the display during physical controller play. Tap the black screen or press Back to exit.</string>
+    <string name="black_screen_exit">Black screen mode. Tap to restore the display.</string>
 </resources>

@@ -1,6 +1,7 @@
 package com.dathaze.pocketpad.hid
 
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Keeps each attached external controller's input separate, then folds them
@@ -36,6 +37,42 @@ class ExternalInputTracker {
         var axisDown = false
         var axisLeft = false
         var axisRight = false
+
+        private var ltKey = false
+        private var rtKey = false
+        private var ltAxis = 0f
+        private var rtAxis = 0f
+
+        fun setTriggerKey(left: Boolean, pressed: Boolean) {
+            if (left) ltKey = pressed else rtKey = pressed
+            applyTriggers()
+        }
+
+        fun setTriggerAxes(left: Float, right: Float) {
+            ltAxis = left
+            rtAxis = right
+            applyTriggers()
+        }
+
+        private fun applyTriggers() {
+            // Some controllers send both a key and a pressure axis. Keep real
+            // pressure when present, and use full pressure for a key-only press.
+            state.lt = triggerByte(ltAxis, ltKey)
+            state.rt = triggerByte(rtAxis, rtKey)
+            state.setButton(HidConstants.BTN_L2, ltKey || ltAxis > 0.12f)
+            state.setButton(HidConstants.BTN_R2, rtKey || rtAxis > 0.12f)
+        }
+
+        private fun triggerByte(axis: Float, key: Boolean): Int =
+            if (axis == 0f && key) 255 else (axis * 255f).roundToInt()
+
+        fun setHatAxes(x: Float, y: Float) {
+            axisLeft = x < -0.5f
+            axisRight = x > 0.5f
+            axisUp = y < -0.5f
+            axisDown = y > 0.5f
+            applyDpad()
+        }
 
         /** Recompute the hat from both d-pad representations. */
         fun applyDpad() {
@@ -93,6 +130,9 @@ class ExternalInputTracker {
         sources.clear()
         detached.clear()
     }
+
+    /** Android may route the matching key-up to a different window after focus is lost. */
+    fun clearAndroidSources(): Boolean = sources.keys.removeAll { it != SOURCE_DS3 }
 
     /**
      * Fold every tracked source into [out]: buttons are OR-ed, the hat takes
