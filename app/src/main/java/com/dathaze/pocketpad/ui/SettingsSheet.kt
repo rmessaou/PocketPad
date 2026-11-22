@@ -58,6 +58,7 @@ class SettingsSheet(private val activity: Activity) {
         fun onChooseVibration()
         fun onToggleTvMenuKeys()
         fun onToggleAndroidButtonLayout()
+        fun onEnterBlackScreen()
         fun onBackgroundPicture()
         fun onCheckForUpdates()
         fun onBluetoothSettings()
@@ -173,6 +174,8 @@ class SettingsSheet(private val activity: Activity) {
             subtitle = R.string.sheet_sub_android_button_layout,
             switchOn = host.androidButtonLayoutOn(),
             chevron = false) { host.onToggleAndroidButtonLayout() }
+        row(rows, "◐", Tint.CONTROLLER, R.string.sheet_black_screen,
+            subtitle = R.string.sheet_sub_black_screen) { host.onEnterBlackScreen() }
 
         group(rows, R.string.sheet_group_appearance)
         row(rows, "▦", Tint.APPEARANCE, R.string.action_background) { host.onBackgroundPicture() }

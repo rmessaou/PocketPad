@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.hardware.input.InputManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -17,11 +18,14 @@ import android.os.Looper
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -59,6 +63,12 @@ class MainActivity : AppCompatActivity(),
     private lateinit var editBar: android.widget.LinearLayout
     private lateinit var hidManager: HidGamepadManager
     private lateinit var ds3Driver: Ds3UsbDriver
+
+    private var blackScreen: View? = null
+    private var brightnessBeforeBlackScreen = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    private val blackScreenBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = exitBlackScreen()
+    }
 
     /**
      * The in-app updater, built the first time the user picks "Check for updates". An install
@@ -146,6 +156,7 @@ class MainActivity : AppCompatActivity(),
         }
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onBackPressedDispatcher.addCallback(this, blackScreenBack)
         enterImmersiveMode()
 
         // Build the Bluetooth manager before restoring preferences: applying a
@@ -191,6 +202,11 @@ class MainActivity : AppCompatActivity(),
         // A version dismissed earlier stays dismissed; this only re-evaluates, it does not
         // re-show what was already waved away.
         updateNotice.refresh()
+    }
+
+    override fun onPause() {
+        exitBlackScreen()
+        super.onPause()
     }
 
     /**
@@ -422,12 +438,46 @@ class MainActivity : AppCompatActivity(),
                 .putBoolean(PREF_ANDROID_BUTTON_LAYOUT, androidButtonLayout).apply()
             sendMerged()
         }
+        override fun onEnterBlackScreen() = enterBlackScreen()
         override fun onBackgroundPicture() = showBackgroundMenu()
         override fun onCheckForUpdates() = checkForUpdates()
         override fun onBluetoothSettings() {
             startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
         }
         override fun onHelp() = showHelp()
+    }
+
+    private fun enterBlackScreen() {
+        if (blackScreen != null) return
+        val content = findViewById<FrameLayout>(android.R.id.content)
+        val cover = View(this).apply {
+            setBackgroundColor(Color.BLACK)
+            // Cover the update banner even if its asynchronous check finishes later.
+            elevation = 32f * resources.displayMetrics.density
+            contentDescription = getString(R.string.black_screen_exit)
+            setOnClickListener { exitBlackScreen() }
+        }
+        val attrs = window.attributes
+        brightnessBeforeBlackScreen = attrs.screenBrightness
+        content.addView(cover, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        blackScreen = cover
+        blackScreenBack.isEnabled = true
+        // A window-local override: keep the screen and activity awake, but request minimum
+        // brightness without changing the system setting or stealing focus with a new window.
+        attrs.screenBrightness = 0f
+        window.attributes = attrs
+    }
+
+    private fun exitBlackScreen() {
+        val cover = blackScreen ?: return
+        blackScreen = null
+        blackScreenBack.isEnabled = false
+        (cover.parent as? FrameLayout)?.removeView(cover)
+        window.attributes = window.attributes.apply {
+            screenBrightness = brightnessBeforeBlackScreen
+        }
     }
 
     /**

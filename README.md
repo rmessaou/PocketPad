@@ -185,6 +185,8 @@ Controllers that Android exposes as native gamepads are forwarded through `KeyEv
 
 When the **receiving device** is an Android phone or tablet, enable **Settings → Controller → Android host button layout**. This uses Android's generic HID button numbering without changing the report descriptor. Leave it off for an existing TV mapping. Keep **TV menu keys** off when testing a gamepad to avoid duplicate keyboard input. See [Android controller testing](docs/ANDROID_CONTROLLER_TESTING.md) for pairing and diagnostics.
 
+For physical-controller play, **Settings → Controller → Black screen mode** blanks the interface and requests minimum display brightness while keeping PocketPad awake and in the foreground. Tap anywhere on the black screen or press Android Back to restore the display. The mode also ends when you leave the app. This is not Android screen lock; the display stays on and battery savings vary by device.
+
 ---
 
 ## How it works

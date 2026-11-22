@@ -30,6 +30,10 @@ Use a gamepad tester that displays Android key names and axis values before test
 - Hold a D-pad direction and a face button while moving both sticks and squeezing the triggers. Release in a different order and check that nothing stays held. Keep playing for several minutes, then disconnect/reconnect and check idle again.
 - Compare the equivalent touchscreen controls with the physical ones. If only physical input fails, capture the raw sender data below. If both fail, inspect the host event stream and pairing.
 
+### Verify black screen mode
+
+While connected, select **Settings → Controller → Black screen mode** on the RG556. The screen should go black without locking. Press and release the physical D-pad and buttons and move both sticks; the tablet should still receive them and see them return to neutral. Tap the black screen to restore the previous brightness without sending a touch control. Re-enter and try Android Back, then re-enter once more and leave the app to check that the mode does not survive in the background.
+
 ## Capture a trace
 
 Logging is off by default and only available in debuggable builds. Start this **before** connecting:
